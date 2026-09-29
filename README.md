@@ -1,2 +1,2 @@
-# ETH-ScopeM_-Kasprzyk
+# ETH-ScopeM_Kasprzyk
 Lysosomal co-localization assay
