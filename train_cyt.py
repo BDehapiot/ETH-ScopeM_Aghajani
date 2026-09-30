@@ -11,6 +11,9 @@ from bdtools.model.model import Model
 from bdtools.annotate import Annotate
 from bdtools.patch import extract_patches
 
+# skimage
+from skimage.transform import rescale
+
 #%% Inputs ====================================================================
 
 parameters = {
@@ -30,7 +33,7 @@ parameters = {
     "n_patches"             : 100,
     "extract_patch_size"    : 512,
     "extract_patch_overlap" : 256,
-    
+        
     }
 
 model_parameters = {
@@ -64,22 +67,22 @@ model_parameters = {
     
     # Prepare -----------------------------------------------------------------
     
-    "patch_size"         : 512,
-    "patch_overlap"      : 256,
+    "patch_size"         : int(512 * main_parameters["cyt_rf"]),
+    "patch_overlap"      : int(256 * main_parameters["cyt_rf"]),
     "mask_method"        : "binary",
 
     # Train -------------------------------------------------------------------
     
     "display"            : 0,
     "epochs"             : 256,
-    "batch_size"         : 8,
+    "batch_size"         : 16,
     "validation_split"   : 0.2,
     "learning_rate"      : 0.001,
     "patience"           : 64,
 
     # Augment -----------------------------------------------------------------
     
-    "augment_iterations" : 256,
+    "augment_iterations" : 512,
     "augment_gamma_p"    : 0.0,
     "augment_gblur_p"    : 0.0,
     "augment_noise_p"    : 0.0,
@@ -116,9 +119,9 @@ model_parameters = {
 
     }
 
-#%% Class(TrainPreview) =======================================================
+#%% Class(TrainCYT) ===========================================================
 
-class TrainPreview:
+class TrainCYT:
     def __init__(self, main, parameters=None, model_parameters=None):
         self.main = main
         self.parameters = parameters
@@ -136,7 +139,7 @@ class TrainPreview:
         if self.run_train:
             self.train()
 
-#%% Class(TrainPreview) extract_patches() =====================================
+#%% Class(TrainCYT) extract_patches() =========================================
 
     def extract_patches(self):
         
@@ -163,12 +166,12 @@ class TrainPreview:
                 check_contrast=False,
                 ) 
                 
-#%% Class(TrainPreview) annotate() ============================================
+#%% Class(TrainCYT) annotate() ================================================
 
     def annotate(self):
         Annotate(self.train_path)  
         
-#%% Class(TrainPreview) train() ===============================================
+#%% Class(TrainCYT) train() ===================================================
 
     def train(self):
         
@@ -186,7 +189,11 @@ class TrainPreview:
             
         # Normalize data
         imgs = imgs.astype("float32") / 255
-            
+        
+        # Rescale data
+        msks = rescale(msks, (1, self.cyt_rf, self.cyt_rf), order=0)
+        imgs = rescale(imgs, (1, self.cyt_rf, self.cyt_rf), order=1)
+                    
         # Setup model
         self.model = Model(parameters=self.model_parameters, model_path=None)
         
@@ -197,5 +204,5 @@ class TrainPreview:
 
 if __name__ == "__main__":
     main  = Main(parameters=main_parameters)
-    train = TrainPreview(
+    train = TrainCYT(
         main, parameters=parameters, model_parameters=model_parameters)
