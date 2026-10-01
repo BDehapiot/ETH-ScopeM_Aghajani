@@ -2,6 +2,7 @@
 
 import nd2
 import numpy as np
+import pandas as pd
 from pathlib import Path
 from joblib import Parallel, delayed
 
@@ -11,10 +12,10 @@ from bdtools.norm import norm_pct
 from bdtools.model.model import Model
 
 # skimage
-from skimage.measure import label
 from skimage.segmentation import watershed
 from skimage.transform import rescale, resize
 from skimage.morphology import remove_small_objects
+from skimage.measure import label, regionprops_table
 
 #%% Function(s) : Main.extract() ==============================================
 
@@ -119,5 +120,113 @@ def get_mask(prd, thresh_0=0.5, thresh_1=None, min_size=0):
         msk = remove_small_objects(msk, min_size=min_size)
         
     return msk
+
+#%% Function(s) : Main.get_result() ===========================================
+
+def get_result(mtd, cyt_msk, c1b_msk, c2b_msk):
+    
+    # Nested function(s) ------------------------------------------------------
+    
+    def _get_result_all(mtd, msk0, msk1):
+
+        df_all = []
+        for i, (_msk0, _msk1) in enumerate(zip(msk0, msk1)):
+            
+            # Measure
+            prp = regionprops_table(
+                label(_msk0), intensity_image=_msk1, 
+                properties=("area", "intensity_mean"),
+                )
+            prp["overlap"] = prp.pop("intensity_mean")
+            
+            # Handle empty prp
+            if len(prp["area"]) == 0:
+                prp["area"   ] = [np.nan]
+                prp["overlap"] = [np.nan]
+                    
+            # Format & append
+            for key, val in prp.items():
+                prp[key] = list(val)
+            for key, val in mtd.items():
+                prp[key] = [val[i]] * len(prp["area"])
+            df_all.append(prp)
+            
+        # Merge & convert to dataframe
+        df_all = pd.DataFrame(df_all)
+        df_all = df_all.explode(df_all.columns.tolist())
+        df_all = df_all[list(mtd.keys()) + ["area", "overlap"]]
+            
+        return df_all
+    
+    def _get_result_img_avg(df_all, cols, tag="c1b"):
+
+        df_iavg = (
+            df_all.groupby(cols, as_index=False).agg(
+                area_avg=("area", "mean"),
+                overlap_avg=("overlap", "mean"),
+                count=("area", "count"),
+                )
+            )
+    
+        # Rename cols
+        df_iavg[f"{tag}_area_avg"   ] = df_iavg.pop("area_avg")
+        df_iavg[f"{tag}_overlap_avg"] = df_iavg.pop("overlap_avg")
+        df_iavg[f"{tag}_count"      ] = df_iavg.pop("count")
+                
+        return df_iavg
+    
+    def _get_result_cnd_avg(df_iavg, cols):
+        
+        df_cavg = (
+            df_iavg.groupby(cols, as_index=False).agg(
+                
+                c1b_area_avg=("c1b_area_avg", "mean"),
+                c1b_area_std=("c1b_area_avg", "std"),
+                c1b_overlap_avg=("c1b_overlap_avg", "mean"),
+                c1b_overlap_std=("c1b_overlap_avg", "std"),
+                c1b_coverage_avg=("c1b_coverage", "mean"),
+                c1b_coverage_std=("c1b_coverage", "std"),
+                c1b_density_avg=("c1b_density", "mean"),
+                c1b_density_std=("c1b_density", "std"),
+                c1b_count=("c1b_count", "sum"),
+                
+                c2b_area_avg=("c2b_area_avg", "mean"),
+                c2b_area_std=("c2b_area_avg", "std"),
+                c2b_overlap_avg=("c2b_overlap_avg", "mean"),
+                c2b_overlap_std=("c2b_overlap_avg", "std"),
+                c2b_coverage_avg=("c2b_coverage", "mean"),
+                c2b_coverage_std=("c2b_coverage", "std"),
+                c2b_density_avg=("c2b_density", "mean"),
+                c2b_density_std=("c2b_density", "std"),
+                c2b_count=("c2b_count", "sum"),
+                
+                )
+            )
+        
+        return df_cavg
+        
+    # Execute -----------------------------------------------------------------
+    
+    img_cols = ["stem", "dmf", "chl", "srm", "time", "numb"]
+    cnd_cols = ["dmf", "chl", "srm", "time"]
+    
+    # Get result
+    c1b_all = _get_result_all(mtd, c1b_msk, c2b_msk)
+    c2b_all = _get_result_all(mtd, c2b_msk, c1b_msk)
+    
+    # Get image avg. result
+    cyt_area = np.sum(cyt_msk, axis=(1, 2))
+    c1b_iavg = _get_result_img_avg(c1b_all, img_cols, tag="c1b")
+    c1b_iavg["c1b_coverage"] = np.sum(c1b_msk, axis=(1, 2)) / cyt_area
+    c1b_iavg["c1b_density" ] = c1b_iavg["c1b_count"] / cyt_area
+    c2b_iavg = _get_result_img_avg(c2b_all, img_cols, tag="c2b") 
+    c2b_iavg["c2b_coverage"] = np.sum(c2b_msk, axis=(1, 2)) / cyt_area
+    c2b_iavg["c2b_density" ] = c2b_iavg["c2b_count"] / cyt_area
+    result_img_avg = pd.merge(c1b_iavg, c2b_iavg, on=img_cols)
+    
+    # Get condition avg. result
+    result_cnd_avg = _get_result_cnd_avg(result_img_avg, cnd_cols)
+    
+    return result_img_avg, result_cnd_avg
 
 
