@@ -228,5 +228,3 @@ def get_result(mtd, cyt_msk, c1b_msk, c2b_msk):
     result_cnd_avg = _get_result_cnd_avg(result_img_avg, cnd_cols)
     
     return result_img_avg, result_cnd_avg
-
-

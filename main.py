@@ -3,8 +3,10 @@
 import pickle
 import napari
 import numpy as np
+import pandas as pd
 from skimage import io
 from pathlib import Path
+import matplotlib.pyplot as plt
 
 # functions
 from functions import (
@@ -14,7 +16,9 @@ from functions import (
 
 # QT
 from qtpy.QtGui import QFont
-from qtpy.QtWidgets import QLabel, QVBoxLayout, QWidget
+from qtpy.QtWidgets import (
+    QGroupBox, QVBoxLayout, QRadioButton, QLabel, QWidget,
+    )
 
 #%% Inputs ====================================================================
 
@@ -26,8 +30,10 @@ main_parameters = {
     "run_get_mask"   : 1,
     "run_get_result" : 1,
     "run_display"    : 1,
+    "run_plot"       : 1,
     
     # Path
+    "root_path"      : Path("D:\local_Aghajani"),
     "data_path"      : Path("D:\local_Aghajani\data"),
     "model_cyt_name" : "model-sm_cyt_256_binary_121-512",
     "model_c1b_name" : "model-sm_c1b_256_edt_134-512",
@@ -50,13 +56,13 @@ main_parameters = {
     "cyt_thresh_1"   : None,
     "cyt_min_size"   : 128,
     
-    "c1b_thresh_0"   : 0.1, 
-    "c1b_thresh_1"   : 0.5,
-    "c1b_min_size"   : 16,
+    "c1b_thresh_0"   : 0.05, 
+    "c1b_thresh_1"   : 0.25,
+    "c1b_min_size"   : 8,
 
-    "c2b_thresh_0"   : 0.1, 
-    "c2b_thresh_1"   : 0.5,
-    "c2b_min_size"   : 16,
+    "c2b_thresh_0"   : 0.05, 
+    "c2b_thresh_1"   : 0.25,
+    "c2b_min_size"   : 8,
     
     # display() ---------------------------------------------------------------
     
@@ -68,8 +74,8 @@ main_parameters = {
     "c2b_color"      : "bop orange",
     
     "cyt_opacity"    : 0.05,
-    "c1b_opacity"    : 0.25,
-    "c2b_opacity"    : 0.25,
+    "c1b_opacity"    : 0.5,
+    "c2b_opacity"    : 0.5,
 
     }
 
@@ -88,13 +94,13 @@ class Main:
         self.get_mask()
         self.get_result()
         self.display()
+        self.plot()
         
 #%% Class(Main) initialize() ==================================================
 
     def initialize(self):
         
         # Paths
-        self.root_path = self.data_path.parent
         self.nd2_paths = list(self.data_path.glob("*.nd2"))
         self.mtd_path  = self.root_path / "metadata.pkl"
         self.C1s_path  = self.root_path / "C1s.tif"
@@ -106,6 +112,7 @@ class Main:
             setattr(self, tag_msk + "_path", self.root_path / (tag_msk + ".tif"))
         self.result_img_avg_path = self.root_path / "result_img_avg.csv"
         self.result_cnd_avg_path = self.root_path / "result_cnd_avg.csv"
+        self.result_plot_path = self.root_path / "result_plot.png"
         
 #%% Class(Main) extract() =====================================================
 
@@ -277,9 +284,19 @@ class Main:
                     opacity=getattr(self, f"{tag}_opacity"),
                     blending="additive",
                     )
-                
+                                
             # Dock ------------------------------------------------------------
             
+            # Create "Checks" menu
+            self.chk_group_box = QGroupBox("Checks")
+            self.chk_group_layout = QVBoxLayout()
+            for tag in ["all", "cyt", "c1b", "c2b", "msks"]:
+                setattr(self, f"chk_{tag}", QRadioButton(tag))
+                self.chk_group_layout.addWidget(getattr(self, f"chk_{tag}"))
+                getattr(self, f"chk_{tag}").clicked.connect(
+                    getattr(self, f"check_{tag}"))
+            self.chk_group_box.setLayout(self.chk_group_layout)
+                       
             # Create texts
             self.info = QLabel()
             self.info.setFont(QFont("Consolas"))
@@ -287,6 +304,7 @@ class Main:
             
             # Create layout
             self.layout = QVBoxLayout()
+            self.layout.addWidget(self.chk_group_box)
             self.layout.addWidget(self.info)
 
             # Create widget
@@ -305,80 +323,128 @@ class Main:
             
             # Shortcuts -------------------------------------------------------
                         
-            @self.vwr.bind_key("Delete", overwrite=True)
+            @self.vwr.bind_key("End", overwrite=True)
             def toogle_masks_key(viewer):
-                self.toogle_masks(False)
+                
+                is_visible = np.empty(3, dtype=bool)
+                
+                for i, tag in enumerate(self.tags):
+                    
+                    if self.vwr.layers[f"{tag}_msk"].visible == True:
+                        is_visible[i] = True
+                        self.vwr.layers[f"{tag}_msk"].visible = False
+                    else:
+                        is_visible[i] = False
+                
                 yield
-                self.toogle_masks(True)
+                                
+                for i, tag in enumerate(self.tags):
+                    
+                    if is_visible[i] == True:
+                        self.vwr.layers[f"{tag}_msk"].visible = True
                 
     # Display function(s) -----------------------------------------------------
+    
+    def check_all(self):
+        for layer in self.vwr.layers:
+            layer.visible = True
+
+    def check_cyt(self):
+        for layer in self.vwr.layers:
+            if layer.name in ["C1s", "cyt_msk"]:
+                layer.visible = True
+            else:
+                layer.visible = False
+    
+    def check_c1b(self):
+        for layer in self.vwr.layers:
+            if layer.name in ["C1s", "c1b_msk"]:
+                layer.visible = True
+            else:
+                layer.visible = False
+    
+    def check_c2b(self):
+        for layer in self.vwr.layers:
+            if layer.name in ["C2s", "c2b_msk"]:
+                layer.visible = True
+            else:
+                layer.visible = False     
                 
-    def toogle_masks(self, visible):
-        for tag in self.tags:
-            self.vwr.layers[f"{tag}_msk"].visible = visible
-            
+    def check_msks(self):
+        for layer in self.vwr.layers:
+            if "msk" in layer.name:
+                layer.visible = True
+            else:
+                layer.visible = False   
+    
     def get_info(self):
         self.info.setText(self.nd2_paths[self.current_slice].name)
+
+#%% Class(Main) plot() ========================================================
+
+    def plot(self):
+        
+        if self.run_plot > 0:
+            
+            # Load
+            df_cnd = pd.read_csv(self.result_cnd_avg_path)
+            
+            # Initialize
+            n = 9
+            conditions = ["Chloroquine", "Siramesine"]
+            cnd_bool = df_cnd.iloc[:n, 1:3].to_numpy()
+            cnd_bool = cnd_bool[::3, :].T
+            cnd_txt = np.where(cnd_bool, "+", "-")
+            
+            # Plot
+            fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+            width = 0.15
+            shifts = [-width * 1.2, 0, width * 1.2] * 3
+            colors = ["silver", "khaki", "gold"] * 3
+            
+            for i in range(n):
+                j = i // 3                
+                print(i, j)
+                
+                c2b_overlap_avg = df_cnd.at[i, "c2b_overlap_avg"]
+                c2b_overlap_std = df_cnd.at[i, "c2b_overlap_std"]
+                ax.bar(
+                    j + shifts[i], c2b_overlap_avg, width, 
+                    yerr=c2b_overlap_std, capsize=4,    
+                    error_kw={
+                        "ecolor"     : "black", 
+                        "elinewidth" : 0.75, 
+                        "capthick"   : 0.75,
+                        },
+                    color=colors[i],
+                    )
+            
+            # Condition table
+            table = ax.table(
+                cellText=cnd_txt,
+                rowLabels=conditions,
+                fontsize=12,
+                loc="bottom",
+                cellLoc="center",
+                bbox=[0, -0.35, 1, 0.25]
+                )
+            for key, cell in table.get_celld().items():
+                cell.set_linewidth(0)
+                
+            # Format
+            ax.set_title("c2b overlap")
+            ax.set_xlim([-0.5, 2.5])
+            ax.set_xticks(np.arange(3))
+            ax.set_xticklabels(["0/1/3h"] * 3)
+            ax.set_ylabel("overlap %", fontsize=12)
+              
+            # Save & show
+            fig.savefig(self.result_plot_path, dpi=150, bbox_inches="tight")
+            plt.tight_layout()
+            plt.show() 
+            
 
 #%% Execute ===================================================================
 
 if __name__ == "__main__":
     main = Main(main_parameters)
-        
-#%% 
-
-    import pandas as pd
-    import matplotlib.pyplot as plt
-    
-    # Load
-    df_img = pd.read_csv(main.result_img_avg_path)
-    df_cnd = pd.read_csv(main.result_cnd_avg_path)
-    
-    # Initialize
-    n = 6
-    conditions = ["Chloroquine", "Siramesine"]
-    cnd_bool = df_cnd.iloc[:n, 1:3].to_numpy()
-    cnd_bool = cnd_bool[::2, :].T
-    cnd_txt = np.where(cnd_bool, "+", "-")
-    
-    # Plot
-    fig, ax = plt.subplots(1, 1, figsize=(4, 4))
-    x = np.arange(n)
-    width = 0.25
-    
-    for i in range(n):
-        j = i // 2
-        is_even = i % 2 == 0
-        shift = - width / 1.8 if is_even else width / 1.8
-        color = "silver" if is_even else "khaki"
-        
-        c2b_overlap_avg = df_cnd.at[i, "c2b_overlap_avg"]
-        c2b_overlap_std = df_cnd.at[i, "c2b_overlap_std"]
-        ax.bar(
-            j + shift, c2b_overlap_avg, width, 
-            yerr=c2b_overlap_std, capsize=4,    
-            error_kw={"ecolor": "black", "elinewidth": 1, "capthick": 1},
-            color=color,
-            )
-    
-    # Condition table
-    table = ax.table(
-        cellText=cnd_txt,
-        rowLabels=conditions,
-        fontsize=12,
-        loc="bottom",
-        cellLoc="center",
-        bbox=[0, -0.35, 1, 0.25]
-        )
-    for key, cell in table.get_celld().items():
-        cell.set_linewidth(0)
-        
-    # Format
-    ax.set_title("c2b/c1b overlap %")
-    ax.set_xlim([-0.5, 2.5])
-    ax.set_xticks(np.arange(3))
-    ax.set_xticklabels(["0h / 1h"] * 3)
-    ax.set_ylabel("overlap %", fontsize=12)
-      
-    plt.tight_layout()
-    plt.show()    
